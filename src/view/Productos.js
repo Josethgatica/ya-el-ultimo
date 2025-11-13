@@ -1,92 +1,96 @@
 import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Button,
-  ScrollView,
-  Alert,
-} from "react-native";
-import { db } from "../database/firebaseConfig";
-import {
-  collection,
-  getDocs,
-  doc,
-  deleteDoc,
-  addDoc,
-  updateDoc,
-} from "firebase/firestore";
-
+import { db } from "../database/firebaseConfig.js";
+import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "firebase/firestore";
 import FormularioProductos from "../Components/FormularioProductos.js";
 import TablaProductos from "../Components/TablaProductos.js";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import * as Sharing from "expo-sharing";
-import * as Clipboard from "expo-clipboard";
+import { View, StyleSheet, Button, Alert } from "react-native";
 
-const colecciones = ["productos", "usuarios", "edades", "ciudades"];
 
-const Productos = ({ cerrarSesion }) => {
+const Productos = ({cerrarSesion}) => {
+
   const [modoEdicion, setModoEdicion] = useState(false);
   const [productoId, setProductoId] = useState(null);
+
   const [productos, setProductos] = useState([]);
-  const [nuevoProducto, setNuevoProducto] = useState({ nombre: "", precio: "" });
 
-  // === MANEJO DEL FORMULARIO ===
-  const manejoCambio = (campo, valor) => {
-    setNuevoProducto((prev) => ({ ...prev, [campo]: valor }));
-  };
+  const [nuevoProducto, setNuevoProducto] = useState({
+    nombre: "",
+    precio: "",
+  });
 
-  const limpiarFormulario = () => {
-    setNuevoProducto({ nombre: "", precio: "" });
-    setModoEdicion(false);
-    setProductoId(null);
+  const manejoCambio = (nombre, valor) => {
+    setNuevoProducto((prev) => ({
+      ...prev,
+      [nombre]: valor,
+    }));
   };
 
   const guardarProducto = async () => {
-    if (!nuevoProducto.nombre || !nuevoProducto.precio) {
-      Alert.alert("Error", "Complete todos los campos");
-      return;
+    try {
+      if (nuevoProducto.nombre && nuevoProducto.precio) {
+        await addDoc(collection(db, "productos"), {
+          nombre: nuevoProducto.nombre,
+          precio: parseFloat(nuevoProducto.precio),
+        });
+        cargarDatos(); // Recargar lista
+        setNuevoProducto({ nombre: "", precio: "" });
+      } else {
+        alert("Por favor, complete todos los campos.");
+      }
+    } catch (error) {
+      console.error("Error al registrar producto:", error);
     }
-    await addDoc(collection(db, "productos"), {
-      nombre: nuevoProducto.nombre,
-      precio: parseFloat(nuevoProducto.precio),
-    });
-    limpiarFormulario();
-    cargarDatos();
   };
 
   const actualizarProducto = async () => {
-    if (!nuevoProducto.nombre || !nuevoProducto.precio) {
-      Alert.alert("Error", "Complete todos los campos");
-      return;
+    try {
+      if (nuevoProducto.nombre && nuevoProducto.precio) {
+        await updateDoc(doc(db, "productos", productoId), {
+          nombre: nuevoProducto.nombre,
+          precio: parseFloat(nuevoProducto.precio),
+        });
+        setNuevoProducto({ nombre: "", precio: "" });
+        setModoEdicion(false); // Volver al modo registro
+        setProductoId(null);
+        cargarDatos(); // Recargar lista
+      } else {
+        alert("Por favor, complete todos los campos.");
+      }
+    } catch (error) {
+      console.error("Error al actualizar producto:", error);
     }
-    await updateDoc(doc(db, "productos", productoId), {
-      nombre: nuevoProducto.nombre,
-      precio: parseFloat(nuevoProducto.precio),
-    });
-    limpiarFormulario();
-    cargarDatos();
   };
 
-  // === CARGA DE PRODUCTOS (PASO 3) ===
   const cargarDatos = async () => {
     try {
-      const snap = await getDocs(collection(db, "productos"));
-      const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setProductos(lista);
-    } catch (e) {
-      console.error("Error cargando productos:", e);
+      const querySnapshot = await getDocs(collection(db, "productos"));
+      const data = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setProductos(data);
+    } catch (error) {
+      console.error("Error al obtener documentos:", error);
     }
   };
 
   const eliminarProducto = async (id) => {
-    await deleteDoc(doc(db, "productos", id));
-    cargarDatos();
+    try {
+      await deleteDoc(doc(db, "productos", id));
+      cargarDatos(); // Recargar lista
+    } catch (error) {
+      console.error("Error al eliminar:", error);
+    }
   };
 
-  const editarProducto = (p) => {
-    setNuevoProducto({ nombre: p.nombre, precio: p.precio.toString() });
-    setProductoId(p.id);
+  const editarProducto = (producto) => {
+    setNuevoProducto({
+      nombre: producto.nombre,
+      precio: producto.precio.toString(),
+    });
+    setProductoId(producto.id);
     setModoEdicion(true);
   };
 
@@ -94,90 +98,89 @@ const Productos = ({ cerrarSesion }) => {
     cargarDatos();
   }, []);
 
-  // === FUNCIÓN GENÉRICA: CARGAR UNA COLECCIÓN (PASO 7b) ===
-  const cargarColeccion = async (nombre) => {
-    try {
-      const snap = await getDocs(collection(db, nombre));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    } catch (e) {
-      console.error(`Error en colección ${nombre}:`, e);
-      return [];
+  const extraerYGuardarMascotas = async () => {
+  try {
+    // Abrir selector de documentos para elegir archivo Excel
+    const result = await DocumentPicker.getDocumentAsync({
+      type: [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+      ],
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      Alert.alert("Cancelado", "No se seleccionó ningún archivo.");
+      return;
     }
-  };
 
-  // === CARGAR TODAS LAS COLECCIONES (PASO 7b) ===
-  const cargarDatosFirebase = async () => {
-    const resultado = {};
-    for (const col of colecciones) {
-      resultado[col] = await cargarColeccion(col);
+    const { uri, name } = result.assets[0];
+    console.log(`Archivo seleccionado: ${name} en ${uri}`);
+
+    // Leer el archivo como base64
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    // Enviar a Lambda para procesar
+    const response = await fetch("https://thzg0v3rj9.execute-api.us-east-1.amazonaws.com/extraerexcel", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ archivoBase64: base64 }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error HTTP en Lambda: ${response.status}`);
     }
-    return resultado;
-  };
 
-  // === EXPORTAR DATOS (PASO 4) ===
-  const exportarDatos = async (datos, nombreArchivo = "datos.txt") => {
-    try {
-      const texto = JSON.stringify(datos, null, 2);
+    const body = await response.json();
+    const { datos } = body;
 
-      // 1. Copiar al portapapeles
-      await Clipboard.setStringAsync(texto);
-      Alert.alert("¡Copiado!", "Datos en el portapapeles");
+    if (!datos || !Array.isArray(datos) || datos.length === 0) {
+      Alert.alert("Error", "No se encontraron datos en el Excel o el archivo está vacío.");
+      return;
+    }
 
-      // 2. Guardar y compartir
-      if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert("Compartir no disponible");
-        return;
+    console.log("Datos extraídos del Excel:", datos);
+
+    // Guardar cada fila en la colección 'mascotas'
+    let guardados = 0;
+    let errores = 0;
+
+    for (const mascota of datos) {
+      try {
+        // Columnas: 'nombre', 'edad', 'raza' (ajusta si los headers son diferentes)
+        await addDoc(collection(db, "mascotas"), {
+          nombre: mascota.nombre || "",
+          edad: parseInt(mascota.edad) || 0,
+          raza: mascota.raza || "",
+        });
+        guardados++;
+      } catch (err) {
+        console.error("Error guardando mascota:", mascota, err);
+        errores++;
       }
-
-      const uri = FileSystem.cacheDirectory + nombreArchivo;
-      await FileSystem.writeAsStringAsync(uri, texto);
-      await Sharing.shareAsync(uri, {
-        mimeType: "text/plain",
-        dialogTitle: "Datos Firebase",
-      });
-    } catch (e) {
-      Alert.alert("Error", e.message);
     }
-  };
 
-  // === EXPORTAR SÓLO PRODUCTOS (PASO 6) ===
-  const exportarProductos = async () => {
-    const datos = await cargarColeccion("productos");
-    await exportarDatos(datos, "productos.txt");
-  };
+    Alert.alert(
+      "Éxito",
+      `Se guardaron ${guardados} mascotas en la colección. Errores: ${errores}.`,
+      [{ text: "OK" }]
+    );
 
-  // === EXPORTAR TODAS LAS COLECCIONES (PASO 7c) ===
-  const exportarTodo = async () => {
-    const datos = await cargarDatosFirebase();
-    await exportarDatos(datos, "TODAS_las_colecciones.txt");
-  };
-
-  // === BOTÓN REUTILIZABLE (PASO 6) ===
-  const BotonExportar = ({ titulo, onPress, color = "#0066cc" }) => (
-    <View style={{ marginVertical: 6 }}>
-      <Button title={titulo} color={color} onPress={onPress} />
-    </View>
-  );
+  } catch (error) {
+    console.error("Error en extraerYGuardarMascotas:", error);
+    Alert.alert("Error", `Error procesando el Excel: ${error.message}`);
+  }
+};
 
   return (
-    <ScrollView style={styles.container}>
-      <Button title="Cerrar Sesión" onPress={cerrarSesion} color="#dc3545" />
+    <View style={styles.container}>
 
-      {/* === BOTONES DE EXPORTACIÓN (PASO 5 y 6) === */}
-      <View style={styles.exportSection}>
-        <Text style={styles.tituloExport}>📤 EXPORTAR DATOS</Text>
-
-        <BotonExportar titulo="Exportar Productos" onPress={exportarProductos} />
-        <BotonExportar titulo="Exportar Usuarios" onPress={() => exportarDatos(colecciones[1], "usuarios.txt")} />
-        <BotonExportar titulo="Exportar Edades"   onPress={() => exportarDatos(colecciones[2], "edades.txt")} />
-        <BotonExportar titulo="Exportar Ciudades" onPress={() => exportarDatos(colecciones[3], "ciudades.txt")} />
-
-        <View style={{ marginTop: 12 }}>
-          <Button title="🚀 EXPORTAR TODO" color="#28a745" onPress={exportarTodo} />
-        </View>
-      </View>
-
-      {/* === FORMULARIO === */}
+      <Button  title="Cerrar Sesión" onPress={cerrarSesion} />
+      <Button  title="Importar Mascotas desde Excel" onPress={extraerYGuardarMascotas} />
       <FormularioProductos
         nuevoProducto={nuevoProducto}
         manejoCambio={manejoCambio}
@@ -185,33 +188,19 @@ const Productos = ({ cerrarSesion }) => {
         actualizarProducto={actualizarProducto}
         modoEdicion={modoEdicion}
       />
-
-      {/* === TABLA === */}
-      <TablaProductos
+      
+      <TablaProductos 
         productos={productos}
-        editarProducto={editarProducto}
+        editarProducto={editarProducto} 
         eliminarProducto={eliminarProducto}
       />
-    </ScrollView>
+      
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f5", padding: 10 },
-  exportSection: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
-    marginVertical: 15,
-    elevation: 4,
-  },
-  tituloExport: {
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 10,
-    color: "#343a40",
-  },
+  container: { flex: 1, padding: 20 },
 });
 
 export default Productos;
