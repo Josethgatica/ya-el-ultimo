@@ -1,88 +1,84 @@
+// src/Screens/Productos.js
 import React, { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Button,
+  Alert,
+  ScrollView,
+} from "react-native";
 import { db } from "../database/firebaseConfig.js";
-import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  doc,
+  deleteDoc,
+  addDoc,
+  updateDoc,
+} from "firebase/firestore";
+
 import FormularioProductos from "../Components/FormularioProductos.js";
 import TablaProductos from "../Components/TablaProductos.js";
+
+// === DEPENDENCIAS PARA EXCEL ===
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { View, StyleSheet, Button, Alert } from "react-native";
 
-
-const Productos = ({cerrarSesion}) => {
-
+const Productos = ({ cerrarSesion }) => {
   const [modoEdicion, setModoEdicion] = useState(false);
   const [productoId, setProductoId] = useState(null);
-
   const [productos, setProductos] = useState([]);
-
   const [nuevoProducto, setNuevoProducto] = useState({
     nombre: "",
     precio: "",
   });
 
+  // === MANEJO DE PRODUCTOS ===
   const manejoCambio = (nombre, valor) => {
-    setNuevoProducto((prev) => ({
-      ...prev,
-      [nombre]: valor,
-    }));
+    setNuevoProducto((prev) => ({ ...prev, [nombre]: valor }));
   };
 
   const guardarProducto = async () => {
-    try {
-      if (nuevoProducto.nombre && nuevoProducto.precio) {
-        await addDoc(collection(db, "productos"), {
-          nombre: nuevoProducto.nombre,
-          precio: parseFloat(nuevoProducto.precio),
-        });
-        cargarDatos(); // Recargar lista
-        setNuevoProducto({ nombre: "", precio: "" });
-      } else {
-        alert("Por favor, complete todos los campos.");
-      }
-    } catch (error) {
-      console.error("Error al registrar producto:", error);
+    if (!nuevoProducto.nombre || !nuevoProducto.precio) {
+      Alert.alert("Error", "Complete todos los campos.");
+      return;
     }
+    await addDoc(collection(db, "productos"), {
+      nombre: nuevoProducto.nombre,
+      precio: parseFloat(nuevoProducto.precio),
+    });
+    setNuevoProducto({ nombre: "", precio: "" });
+    cargarDatos();
   };
 
   const actualizarProducto = async () => {
-    try {
-      if (nuevoProducto.nombre && nuevoProducto.precio) {
-        await updateDoc(doc(db, "productos", productoId), {
-          nombre: nuevoProducto.nombre,
-          precio: parseFloat(nuevoProducto.precio),
-        });
-        setNuevoProducto({ nombre: "", precio: "" });
-        setModoEdicion(false); // Volver al modo registro
-        setProductoId(null);
-        cargarDatos(); // Recargar lista
-      } else {
-        alert("Por favor, complete todos los campos.");
-      }
-    } catch (error) {
-      console.error("Error al actualizar producto:", error);
+    if (!nuevoProducto.nombre || !nuevoProducto.precio) {
+      Alert.alert("Error", "Complete todos los campos.");
+      return;
     }
+    await updateDoc(doc(db, "productos", productoId), {
+      nombre: nuevoProducto.nombre,
+      precio: parseFloat(nuevoProducto.precio),
+    });
+    setNuevoProducto({ nombre: "", precio: "" });
+    setModoEdicion(false);
+    setProductoId(null);
+    cargarDatos();
   };
 
   const cargarDatos = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "productos"));
-      const data = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setProductos(data);
-    } catch (error) {
-      console.error("Error al obtener documentos:", error);
-    }
+    const querySnapshot = await getDocs(collection(db, "productos"));
+    const data = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    setProductos(data);
   };
 
   const eliminarProducto = async (id) => {
-    try {
-      await deleteDoc(doc(db, "productos", id));
-      cargarDatos(); // Recargar lista
-    } catch (error) {
-      console.error("Error al eliminar:", error);
-    }
+    await deleteDoc(doc(db, "productos", id));
+    cargarDatos();
   };
 
   const editarProducto = (producto) => {
@@ -98,89 +94,123 @@ const Productos = ({cerrarSesion}) => {
     cargarDatos();
   }, []);
 
+  // ========================================
+  // FUNCIÓN: IMPORTAR MASCOTAS
+  // ========================================
   const extraerYGuardarMascotas = async () => {
-  try {
-    // Abrir selector de documentos para elegir archivo Excel
-    const result = await DocumentPicker.getDocumentAsync({
-      type: [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.ms-excel',
-      ],
-      copyToCacheDirectory: true,
-    });
+    await importarExcel("mascotas", ["nombre", "edad", "raza"], (row) => ({
+      nombre: row.nombre?.toString().trim() || "Sin nombre",
+      edad: parseInt(row.edad) || 0,
+      raza: row.raza?.toString().trim() || "Sin raza",
+    }));
+  };
 
-    if (result.canceled || !result.assets || result.assets.length === 0) {
-      Alert.alert("Cancelado", "No se seleccionó ningún archivo.");
-      return;
-    }
+  // ========================================
+  // FUNCIÓN: IMPORTAR BICICLETAS
+  // ========================================
+  const extraerYGuardarBicicletas = async () => {
+    await importarExcel("bicicletas", ["marca", "modelo", "precio", "color"], (row) => ({
+      marca: row.marca?.toString().trim() || "Sin marca",
+      modelo: row.modelo?.toString().trim() || "Sin modelo",
+      precio: parseFloat(row.precio) || 0,
+      color: row.color?.toString().trim() || "Sin color",
+    }));
+  };
 
-    const { uri, name } = result.assets[0];
-    console.log(`Archivo seleccionado: ${name} en ${uri}`);
+  // ========================================
+  // FUNCIÓN GENÉRICA: IMPORTAR EXCEL
+  // ========================================
+  const importarExcel = async (coleccion, columnasEsperadas, mapearFila) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+        ],
+        copyToCacheDirectory: true,
+      });
 
-    // Leer el archivo como base64
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
-    // Enviar a Lambda para procesar
-    const response = await fetch("https://thzg0v3rj9.execute-api.us-east-1.amazonaws.com/extraerexcel", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ archivoBase64: base64 }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Error HTTP en Lambda: ${response.status}`);
-    }
-
-    const body = await response.json();
-    const { datos } = body;
-
-    if (!datos || !Array.isArray(datos) || datos.length === 0) {
-      Alert.alert("Error", "No se encontraron datos en el Excel o el archivo está vacío.");
-      return;
-    }
-
-    console.log("Datos extraídos del Excel:", datos);
-
-    // Guardar cada fila en la colección 'mascotas'
-    let guardados = 0;
-    let errores = 0;
-
-    for (const mascota of datos) {
-      try {
-        // Columnas: 'nombre', 'edad', 'raza' (ajusta si los headers son diferentes)
-        await addDoc(collection(db, "mascotas"), {
-          nombre: mascota.nombre || "",
-          edad: parseInt(mascota.edad) || 0,
-          raza: mascota.raza || "",
-        });
-        guardados++;
-      } catch (err) {
-        console.error("Error guardando mascota:", mascota, err);
-        errores++;
+      if (result.canceled || !result.assets?.length) {
+        Alert.alert("Cancelado", "No se seleccionó archivo.");
+        return;
       }
+
+      const { uri, name } = result.assets[0];
+
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const response = await fetch(
+        "https://thzg0v3rj9.execute-api.us-east-1.amazonaws.com/extraerexcel",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archivoBase64: base64 }),
+        }
+      );
+
+      if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
+
+      const { datos } = await response.json();
+
+      if (!Array.isArray(datos) || datos.length === 0) {
+        Alert.alert("Error", "El Excel está vacío o no tiene datos.");
+        return;
+      }
+
+      let guardados = 0;
+      let errores = 0;
+
+      for (const fila of datos) {
+        try {
+          const datosMapeados = mapearFila(fila);
+          await addDoc(collection(db, coleccion), {
+            ...datosMapeados,
+            fechaImportacion: new Date(),
+          });
+          guardados++;
+        } catch (err) {
+          errores++;
+          console.error("Error guardando fila:", fila, err);
+        }
+      }
+
+      Alert.alert(
+        "Importación Completada",
+        `${guardados} registros guardados en '${coleccion}'.\nErrores: ${errores}`
+      );
+    } catch (error) {
+      Alert.alert("Error", error.message || "Falló la importación.");
     }
+  };
 
-    Alert.alert(
-      "Éxito",
-      `Se guardaron ${guardados} mascotas en la colección. Errores: ${errores}.`,
-      [{ text: "OK" }]
-    );
-
-  } catch (error) {
-    console.error("Error en extraerYGuardarMascotas:", error);
-    Alert.alert("Error", `Error procesando el Excel: ${error.message}`);
-  }
-};
-
+  // ========================================
+  // RENDER
+  // ========================================
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
+      <Button title="Cerrar Sesión" onPress={cerrarSesion} color="#dc3545" />
 
-      <Button  title="Cerrar Sesión" onPress={cerrarSesion} />
-      <Button  title="Importar Mascotas desde Excel" onPress={extraerYGuardarMascotas} />
+      {/* === BOTONES DE IMPORTACIÓN === */}
+      <View style={styles.importSection}>
+        <Text style={styles.tituloImport}>Importar desde Excel</Text>
+
+        <Button
+          title="Importar Mascotas"
+          onPress={extraerYGuardarMascotas}
+          color="#28a745"
+        />
+        <View style={{ marginVertical: 5 }} />
+
+        <Button
+          title="Importar Bicicletas"
+          onPress={extraerYGuardarBicicletas}
+          color="#007bff"
+        />
+      </View>
+
+      {/* === FORMULARIO PRODUCTOS === */}
       <FormularioProductos
         nuevoProducto={nuevoProducto}
         manejoCambio={manejoCambio}
@@ -188,19 +218,33 @@ const Productos = ({cerrarSesion}) => {
         actualizarProducto={actualizarProducto}
         modoEdicion={modoEdicion}
       />
-      
-      <TablaProductos 
+
+      {/* === TABLA PRODUCTOS === */}
+      <TablaProductos
         productos={productos}
-        editarProducto={editarProducto} 
+        editarProducto={editarProducto}
         eliminarProducto={eliminarProducto}
       />
-      
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
+  container: { flex: 1, padding: 15, backgroundColor: "#f8f9fa" },
+  importSection: {
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 12,
+    marginVertical: 15,
+    elevation: 3,
+  },
+  tituloImport: {
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 12,
+    color: "#343a40",
+  },
 });
 
 export default Productos;
